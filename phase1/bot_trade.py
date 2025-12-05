@@ -4,6 +4,9 @@ import random
 
 history = []
 
+MM_A_LENGTH = 17
+MM_B_LENGTH = 7
+
 def get_delta(history: list[dict[str, int]]) -> float:
     return history[-1]["price"] - history[-2]["price"]
 
@@ -17,11 +20,11 @@ def make_decision(epoch: int, price: float):
         return {"Asset A": 0.5, "Cash": 0.5}
 
     # Calcul des moyennes mobiles
-    mm8 = sum(history[-8:]) / 8
-    mm5 = sum(history[-5:]) / 5
+    mm_a = sum(history[-MM_A_LENGTH:]) / MM_A_LENGTH
+    mm_b = sum(history[-MM_B_LENGTH:]) / MM_B_LENGTH
 
     # Logique de décision
-    if mm8 > mm5:
+    if mm_a > mm_b:
         # Tendance haussière : on investit (ex : 80%)
         return {"Asset A": 0.8, "Cash": 0.2}
     else:
