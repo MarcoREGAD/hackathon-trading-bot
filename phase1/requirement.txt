@@ -1,6 +1,7 @@
 matplotlib
 pandas
 numpy
+python-dotenv
 
 # Optional dependencies below (uncomment if needed)
 # scipy
@@ -23,7 +24,7 @@ numpy
 # pillow
 # opencv-python
 # python-utils
-# python-dotenv
+python-dotenv
 # click
 # tqdm
 # python-toolz

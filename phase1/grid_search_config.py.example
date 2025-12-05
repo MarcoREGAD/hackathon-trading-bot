@@ -1,0 +1,38 @@
+"""
+Configuration personnalisée pour le grid search.
+
+Ce fichier est optionnel. Si absent, le grid search générera automatiquement
+des ranges basés sur les valeurs de .env.example.
+
+Pour chaque paramètre, définissez une liste de valeurs à tester.
+"""
+
+# Configuration pour mode QUICK (rapide)
+GRID_CONFIG_QUICK = {
+    'SHORT_WINDOW': [30, 35, 40],
+    'LONG_WINDOW': [45, 50, 55],
+    'TREND_GAIN': [1.5, 2.0, 2.5],
+    'SMOOTH_ALPHA': [0.2, 0.3],
+    'DD_HARD': [0.15, 0.20],
+}
+
+# Configuration pour mode NORMAL (défaut)
+GRID_CONFIG_NORMAL = {
+    'SHORT_WINDOW': [30, 35, 40, 45],
+    'LONG_WINDOW': [45, 50, 55, 60],
+    'TREND_GAIN': [1.5, 2.0, 2.5, 3.0],
+    'SMOOTH_ALPHA': [0.2, 0.3, 0.4],
+    'DD_HARD': [0.15, 0.20, 0.25],
+}
+
+# Configuration pour mode FULL (exhaustif)
+GRID_CONFIG_FULL = {
+    'SHORT_WINDOW': list(range(20, 51, 5)),  # 20, 25, 30, ..., 50
+    'LONG_WINDOW': list(range(40, 81, 5)),   # 40, 45, 50, ..., 80
+    'TREND_GAIN': [1.0, 1.5, 2.0, 2.5, 3.0, 3.5],
+    'SMOOTH_ALPHA': [0.1, 0.2, 0.3, 0.4, 0.5],
+    'DD_HARD': [0.10, 0.15, 0.20, 0.25, 0.30],
+}
+
+# Configuration utilisée par défaut (peut être surchargée par argument)
+GRID_CONFIG = GRID_CONFIG_NORMAL
