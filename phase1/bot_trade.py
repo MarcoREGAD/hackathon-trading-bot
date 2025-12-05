@@ -17,11 +17,11 @@ def make_decision(epoch: int, price: float):
         return {"Asset A": 0.5, "Cash": 0.5}
 
     # Calcul des moyennes mobiles
-    mm200 = sum(history[-200:]) / 200
-    mm500 = sum(history[-500:]) / 500
+    mm8 = sum(history[-8:]) / 8
+    mm5 = sum(history[-5:]) / 5
 
     # Logique de décision
-    if mm200 > mm500:
+    if mm8 > mm5:
         # Tendance haussière : on investit (ex : 80%)
         return {"Asset A": 0.8, "Cash": 0.2}
     else:
