@@ -128,7 +128,7 @@ def train_model(X, y):
     
     # Entraîner le modèle
     print("\nEntraînement du modèle...")
-    model = LogisticRegression(max_iter=1000, random_state=42)
+    model = LogisticRegression(max_iter=100000, random_state=42)
     model.fit(X_train, y_train)
     
     # Évaluation
@@ -205,7 +205,7 @@ def prepare_single_dataset_wrapper(args):
         return (None, None, None, csv_path, False, str(e))
 
 
-def prepare_multiple_datasets(csv_paths: list, max_workers: int = 4) -> tuple:
+def prepare_multiple_datasets(csv_paths: list, max_workers: int = 16) -> tuple:
     """
     Charge et combine plusieurs datasets pour l'entraînement (en parallèle).
     
