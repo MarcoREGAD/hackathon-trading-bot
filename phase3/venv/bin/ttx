@@ -1,4 +1,4 @@
-#!/home/raphael/directory/third-year/hackathon-trading-bot/phase3/venv/bin/python3
+#!/Users/marco/code/personal_projects/hackathon-trading-bot/phase3/venv/bin/python3.14
 import sys
 from fontTools.ttx import main
 if __name__ == '__main__':
