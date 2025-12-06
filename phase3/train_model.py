@@ -103,12 +103,12 @@ def prepare_data(csv_path: str, asset_col: str = 'Asset A'):
     
     feature_names = [
         'ret_1', 'ret_3', 'ret_5', 'ret_10', 'ret_20',
-        'vol_5', 'vol_10', 'vol_20', 'atr_14',
+        'vol_5', 'vol_10', 'vol_20', 'atr_14', 'vol_ratio',
         'ma_ratio_5_20', 'ma_ratio_10_30', 'ema_ratio_12_26',
         'price_to_ma_20', 'price_to_ma_50',
         'rsi_14', 'macd_norm', 'macd_signal_norm', 'macd_hist_norm',
-        'bb_width', 'bb_position', 'momentum_5', 'momentum_10',
-        'trend_slope_norm'
+        'bb_width', 'bb_position', 'momentum_5', 'momentum_10', 'roc_14',
+        'trend_slope_norm', 'trend_strength', 'price_range_position'
     ]
     
     return X, y, feature_names
@@ -137,9 +137,22 @@ def train_model(X, y):
     print(f"  Train: {len(X_train)} samples")
     print(f"  Test: {len(X_test)} samples")
     
-    # Entraîner le modèle
+    # Entraîner le modèle avec hyperparamètres optimisés pour le trading
     print("\nEntraînement du modèle...")
-    model = LogisticRegression(max_iter=1000, random_state=42)
+    # Essayer plusieurs valeurs de C pour trouver le meilleur compromis
+    # C plus petit = plus de régularisation (évite overfitting)
+    # C plus grand = moins de régularisation (peut capturer plus de patterns)
+    model = LogisticRegression(
+        max_iter=3000, 
+        random_state=42,
+        C=0.8,  # Régularisation modérée - compromis optimal
+        solver='saga',  # Solver efficace pour grands datasets
+        penalty='l2',
+        class_weight='balanced',  # Gérer le déséquilibre des classes
+        warm_start=False,
+        n_jobs=-1  # Utiliser tous les CPU disponibles
+    )
+    print("after this")
     model.fit(X_train, y_train)
     
     # Évaluation
@@ -309,12 +322,12 @@ def prepare_data(csv_path: str, asset_col: str = 'Asset A', silent: bool = False
     
     feature_names = [
         'ret_1', 'ret_3', 'ret_5', 'ret_10', 'ret_20',
-        'vol_5', 'vol_10', 'vol_20', 'atr_14',
+        'vol_5', 'vol_10', 'vol_20', 'atr_14', 'vol_ratio',
         'ma_ratio_5_20', 'ma_ratio_10_30', 'ema_ratio_12_26',
         'price_to_ma_20', 'price_to_ma_50',
         'rsi_14', 'macd_norm', 'macd_signal_norm', 'macd_hist_norm',
-        'bb_width', 'bb_position', 'momentum_5', 'momentum_10',
-        'trend_slope_norm'
+        'bb_width', 'bb_position', 'momentum_5', 'momentum_10', 'roc_14',
+        'trend_slope_norm', 'trend_strength', 'price_range_position'
     ]
     
     return X, y, feature_names

@@ -115,16 +115,16 @@ def compute_features_from_close_series(closes: list[float]) -> list[float]:
                 Doit contenir au moins WINDOW_MAX éléments.
     
     Returns:
-        Liste de features (20+ features avancées)
+        Liste de features (25+ features ultra-optimisées)
     
     Features:
         - Retours multiples périodes: ret_1, ret_3, ret_5, ret_10, ret_20
-        - Volatilités: vol_5, vol_10, vol_20, atr_14
+        - Volatilités adaptatives: vol_5, vol_10, vol_20, atr_14, vol_ratio
         - Moyennes mobiles: ma_ratio_5_20, ma_ratio_10_30, ema_ratio_12_26
         - Indicateurs techniques: rsi_14, macd, macd_signal, macd_hist
         - Bollinger Bands: bb_position, bb_width
-        - Momentum: momentum_5, momentum_10
-        - Tendance: price_to_ma_20, price_to_ma_50
+        - Momentum avancé: momentum_5, momentum_10, roc_14
+        - Tendance: price_to_ma_20, price_to_ma_50, trend_slope, trend_strength
     """
     if len(closes) < WINDOW_MAX:
         raise ValueError(f"La série doit contenir au moins {WINDOW_MAX} éléments, reçu {len(closes)}")
@@ -138,7 +138,7 @@ def compute_features_from_close_series(closes: list[float]) -> list[float]:
     ret_10 = (current / closes[-11] - 1) if len(closes) >= 11 else 0.0
     ret_20 = (current / closes[-21] - 1) if len(closes) >= 21 else 0.0
     
-    # === VOLATILITÉS ===
+    # === VOLATILITÉS ADAPTATIVES ===
     returns_5 = [closes[i] / closes[i-1] - 1 for i in range(-5, 0)] if len(closes) >= 6 else [0.0]
     vol_5 = stdev(returns_5) if len(returns_5) > 1 else 0.0
     
@@ -149,6 +149,9 @@ def compute_features_from_close_series(closes: list[float]) -> list[float]:
     vol_20 = stdev(returns_20) if len(returns_20) > 1 else 0.0
     
     atr_14 = _atr(closes, 14)
+    
+    # Ratio de volatilité court-terme / long-terme (détecte les changements de régime)
+    vol_ratio = (vol_5 / vol_20) if vol_20 > 0 else 1.0
     
     # === MOYENNES MOBILES ===
     ma_5 = mean(closes[-5:]) if len(closes) >= 5 else current
@@ -182,11 +185,14 @@ def compute_features_from_close_series(closes: list[float]) -> list[float]:
     # Position du prix dans les bandes (0 = bande basse, 1 = bande haute)
     bb_position = ((current - bb_lower) / (bb_upper - bb_lower)) if (bb_upper - bb_lower) != 0 else 0.5
     
-    # === MOMENTUM ===
+    # === MOMENTUM AVANCÉ ===
     momentum_5 = _momentum(closes, 5)
     momentum_10 = _momentum(closes, 10)
     
-    # === TENDANCE (price action) ===
+    # Rate of Change sur 14 périodes
+    roc_14 = (current / closes[-15] - 1) if len(closes) >= 15 else 0.0
+    
+    # === TENDANCE AVANCÉE (price action) ===
     # Calcul de la pente de régression linéaire sur les 20 dernières périodes
     if len(closes) >= 20:
         recent_20 = closes[-20:]
@@ -199,8 +205,20 @@ def compute_features_from_close_series(closes: list[float]) -> list[float]:
         
         trend_slope = numerator / denominator if denominator != 0 else 0.0
         trend_slope_norm = trend_slope / mean_y if mean_y != 0 else 0.0
+        
+        # Force de la tendance (R²)
+        ss_tot = sum((y - mean_y) ** 2 for y in recent_20)
+        ss_res = sum((y - (mean_y + trend_slope * (x - mean_x))) ** 2 for x, y in zip(x_vals, recent_20))
+        trend_strength = 1 - (ss_res / ss_tot) if ss_tot > 0 else 0.0
     else:
         trend_slope_norm = 0.0
+        trend_strength = 0.0
+    
+    # === FEATURES SUPPLÉMENTAIRES ===
+    # Détection de breakout: prix actuel vs max/min récent
+    max_20 = max(closes[-20:]) if len(closes) >= 20 else current
+    min_20 = min(closes[-20:]) if len(closes) >= 20 else current
+    price_range_position = ((current - min_20) / (max_20 - min_20)) if (max_20 - min_20) > 0 else 0.5
     
     # Retour dans un ordre fixe
     features = [
@@ -213,6 +231,7 @@ def compute_features_from_close_series(closes: list[float]) -> list[float]:
         vol_10,
         vol_20,
         atr_14,
+        vol_ratio,
         ma_ratio_5_20,
         ma_ratio_10_30,
         ema_ratio_12_26,
@@ -226,7 +245,10 @@ def compute_features_from_close_series(closes: list[float]) -> list[float]:
         bb_position,
         momentum_5,
         momentum_10,
+        roc_14,
         trend_slope_norm,
+        trend_strength,
+        price_range_position,
     ]
     
     return features
@@ -248,6 +270,6 @@ def compute_features_from_prices_dict(history: list[dict]) -> list[float]:
     
     if len(closes) < WINDOW_MAX:
         # Retourner des features neutres si pas assez de données
-        return [0.0] * 23  # 23 features au total maintenant
+        return [0.0] * 27  # 27 features au total maintenant
     
     return compute_features_from_close_series(closes)

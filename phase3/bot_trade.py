@@ -15,12 +15,16 @@ from features import compute_features_from_close_series, WINDOW_MAX
 # Nombre minimal de bougies nécessaires pour calculer les features
 MIN_HISTORY_LENGTH = WINDOW_MAX
 
-# Seuils de décision pour la conversion probabilité -> position (plus agressifs)
-UPPER_THRESHOLD = 0.505  # Si P(hausse) > 0.505 => position longue sur Asset A
-LOWER_THRESHOLD = 0.495  # Si P(hausse) < 0.495 => position courte sur Asset A
+# Seuils de décision - OPTIMISÉS pour maximiser le PnL
+UPPER_THRESHOLD = 0.525  # Si P(hausse) > 0.525 => position longue sur Asset A
+LOWER_THRESHOLD = 0.475  # Si P(hausse) < 0.475 => position courte sur Asset A
 
 # Taille de la position maximale sur Asset A (entre 0 et 1)
-MAX_POSITION_ASSET_A = 0.95  # 95% max du capital sur Asset A (très agressif)
+MAX_POSITION_ASSET_A = 0.90  # 90% max du capital sur Asset A pour les signaux très forts
+
+# Seuils de haute confiance pour positions maximales
+HIGH_CONFIDENCE_UPPER = 0.57  # Au-dessus = très forte confiance haussière
+HIGH_CONFIDENCE_LOWER = 0.43  # En-dessous = très forte confiance baissière
 
 # Fichier contenant les poids du modèle
 MODEL_WEIGHTS_FILE = 'forex_model_weights.json'
@@ -90,30 +94,45 @@ def predict_proba_up(features: list[float]) -> float:
 
 def proba_to_position(p_up: float) -> float:
     """
-    Convertit une probabilité en position sur Asset A (version agressive).
+    Convertit une probabilité en position sur Asset A - VERSION OPTIMISÉE pour PnL.
     
     Args:
         p_up: Probabilité de hausse (entre 0 et 1)
     
     Returns:
-        Position entre -1.0 (short max) et 1.0 (long max)
+        Position entre -0.85 et 0.90
         0.0 = position neutre (flat)
     """
-    if p_up > UPPER_THRESHOLD:
-        # Signal haussier => position longue agressive
-        # Utiliser une fonction non-linéaire pour amplifier les signaux forts
-        strength = (p_up - UPPER_THRESHOLD) / (1.0 - UPPER_THRESHOLD)
-        # Amplification quadratique pour les signaux très forts
-        amplified_strength = strength ** 0.7  # Exponentiel < 1 pour plus d'agressivité
-        return amplified_strength * MAX_POSITION_ASSET_A
+    
+    if p_up > HIGH_CONFIDENCE_UPPER:
+        # TRÈS haute confiance haussière => position maximale
+        strength = (p_up - HIGH_CONFIDENCE_UPPER) / (1.0 - HIGH_CONFIDENCE_UPPER)
+        # Amplifier les très bons signaux
+        position = 0.65 + (strength ** 0.8) * 0.25  # Entre 0.65 et 0.90
+        return position
+        
+    elif p_up > UPPER_THRESHOLD:
+        # Confiance haussière modérée => position progressive
+        strength = (p_up - UPPER_THRESHOLD) / (HIGH_CONFIDENCE_UPPER - UPPER_THRESHOLD)
+        # Croissance plus rapide vers les positions fortes
+        position = (strength ** 0.75) * 0.65  # Entre 0 et 0.65
+        return position
+        
+    elif p_up < HIGH_CONFIDENCE_LOWER:
+        # TRÈS haute confiance baissière => minimiser Asset A
+        strength = (HIGH_CONFIDENCE_LOWER - p_up) / HIGH_CONFIDENCE_LOWER
+        position = -(0.55 + (strength ** 0.8) * 0.30)  # Entre -0.55 et -0.85
+        return position
+        
     elif p_up < LOWER_THRESHOLD:
-        # Signal baissier => réduire drastiquement Asset A
-        strength = (LOWER_THRESHOLD - p_up) / LOWER_THRESHOLD
-        amplified_strength = strength ** 0.7
-        return -amplified_strength * 0.6  # Position négative plus importante
+        # Confiance baissière modérée
+        strength = (LOWER_THRESHOLD - p_up) / (LOWER_THRESHOLD - HIGH_CONFIDENCE_LOWER)
+        position = -((strength ** 0.75) * 0.55)  # Entre 0 et -0.55
+        return position
+        
     else:
-        # Zone neutre - mais légère préférence selon la probabilité
-        return (p_up - 0.5) * 0.2  # Petite position même dans la zone neutre
+        # Zone neutre => rester flat
+        return 0.0
 
 
 # ============================================================================
@@ -137,36 +156,41 @@ def make_flat_decision() -> dict:
 def build_decision_from_position(target_position: float) -> dict:
     """
     Construit une décision d'allocation à partir d'une position cible sur Asset A.
-    Version optimisée pour maximiser les gains.
+    VERSION OPTIMISÉE pour maximiser le PnL.
     
     Args:
-        target_position: Position sur Asset A (entre -1 et 1)
-            1.0 = 100% du capital alloué à Asset A
-            0.0 = position neutre
-            -1.0 = éviter Asset A au maximum
+        target_position: Position sur Asset A (entre -0.85 et 0.90)
+            > 0 = bull sur Asset A
+            0 = neutre (33/33/33)
+            < 0 = bear sur Asset A
     
     Returns:
         Dict avec les allocations pour Asset A, Asset B et Cash
     """
     if target_position > 0:
-        # Position longue sur Asset A - TRÈS AGRESSIF
-        asset_a_weight = min(target_position, MAX_POSITION_ASSET_A)
-        # Minimiser Asset B et Cash pour maximiser l'exposition
+        # Signal haussier => maximiser Asset A de manière progressive
+        # Formule optimisée: plus le signal est fort, plus on met en Asset A
+        asset_a_weight = (1/3) + target_position * 0.70  # De 33% à ~96%
+        asset_a_weight = min(asset_a_weight, MAX_POSITION_ASSET_A)
         remaining = 1 - asset_a_weight
-        asset_b_weight = remaining * 0.2  # Seulement 20% du reste en Asset B
-        cash_weight = remaining * 0.8     # Le reste en cash
+        # Garder un peu de cash de sécurité
+        cash_weight = remaining * 0.60
+        asset_b_weight = remaining * 0.40
+        
     elif target_position < 0:
-        # Signal baissier - éviter Asset A, privilégier Asset B et Cash
-        asset_a_weight = max(0.02, 1/3 + target_position * 0.4)  # Minimum 2%
-        # Répartir le reste entre Asset B (plus risqué) et Cash
+        # Signal baissier => réduire Asset A, augmenter Asset B et Cash
+        # Formule: plus le signal est baissier, moins d'Asset A
+        asset_a_weight = max(0.03, (1/3) + target_position * 0.37)  # De ~3% à 33%
         remaining = 1 - asset_a_weight
-        asset_b_weight = remaining * 0.5  # 50% en Asset B
-        cash_weight = remaining * 0.5     # 50% en Cash
+        # Favoriser Asset B (potentiel de gain) et Cash (sécurité)
+        asset_b_weight = remaining * 0.55
+        cash_weight = remaining * 0.45
+        
     else:
-        # Position neutre - légère préférence pour Asset A
-        asset_a_weight = 0.4
-        asset_b_weight = 0.3
-        cash_weight = 0.3
+        # Position neutre = répartition égale
+        asset_a_weight = 1/3
+        asset_b_weight = 1/3
+        cash_weight = 1/3
     
     # S'assurer que les poids sont valides
     total = asset_a_weight + asset_b_weight + cash_weight
