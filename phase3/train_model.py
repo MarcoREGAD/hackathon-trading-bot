@@ -17,8 +17,7 @@ import glob
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import accuracy_score, classification_report, roc_auc_score
+from sklearn.metrics import accuracy_score, classification_report
 from features import compute_features_from_close_series, WINDOW_MAX
 
 
@@ -97,20 +96,14 @@ def prepare_data(csv_path: str, asset_col: str = 'Asset A'):
     print(f"Shape de y: {y.shape}")
     print(f"Distribution des labels - Hausse: {np.sum(y)}, Baisse: {len(y) - np.sum(y)}")
     
-    feature_names = [
-        'ret_1', 'ret_5', 'ret_10',
-        'vol_10', 'vol_20',
-        'ma_ratio_5_20', 'price_to_ma10',
-        'rsi_normalized', 'momentum_10',
-        'ret_vol_interaction'
-    ]
+    feature_names = ['ret_1', 'ret_5', 'ret_10', 'vol_10', 'ma_ratio_5_20']
     
     return X, y, feature_names
 
 
 def train_model(X, y):
     """
-    Entraîne un modèle de régression logistique avec split temporel et optimisations.
+    Entraîne un modèle de régression logistique avec split temporel.
     
     Args:
         X: Features
@@ -118,126 +111,55 @@ def train_model(X, y):
     
     Returns:
         model: Modèle entraîné
-        scaler: Scaler pour normalisation
         X_train, X_test, y_train, y_test: Données de train/test
     """
-    # Split temporel (important pour le trading) - 80% train pour plus de données
+    # Split temporel (important pour le trading)
     n = len(X)
-    train_size = int(n * 0.80)
+    train_size = int(n * 0.7)
     
     X_train, X_test = X[:train_size], X[train_size:]
     y_train, y_test = y[:train_size], y[train_size:]
     
-    print(f"\n{'='*70}")
-    print(f"SPLIT TEMPOREL")
-    print(f"{'='*70}")
-    print(f"  Train: {len(X_train):,} samples ({len(X_train)/n*100:.1f}%)")
-    print(f"  Test:  {len(X_test):,} samples ({len(X_test)/n*100:.1f}%)")
+    print(f"\nSplit temporel:")
+    print(f"  Train: {len(X_train)} samples")
+    print(f"  Test: {len(X_test)} samples")
     
-    # Standardisation des features (crucial pour la régression logistique)
-    print(f"\n{'='*70}")
-    print(f"STANDARDISATION DES FEATURES")
-    print(f"{'='*70}")
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    X_test_scaled = scaler.transform(X_test)
-    print("✓ Features standardisées (mean=0, std=1)")
+    # Entraîner le modèle
+    print("\nEntraînement du modèle...")
+    model = LogisticRegression(max_iter=1000, random_state=42)
+    model.fit(X_train, y_train)
     
-    # Tester plusieurs configurations de régularisation
-    print(f"\n{'='*70}")
-    print(f"RECHERCHE DE LA MEILLEURE RÉGULARISATION")
-    print(f"{'='*70}")
-    
-    best_score = 0
-    best_C = 1.0
-    C_values = [0.01, 0.1, 0.5, 1.0, 5.0, 10.0]
-    
-    for C in C_values:
-        model_temp = LogisticRegression(
-            C=C,
-            max_iter=2000,
-            random_state=42,
-            solver='lbfgs',
-            class_weight='balanced'  # Important pour les classes déséquilibrées
-        )
-        model_temp.fit(X_train_scaled, y_train)
-        score = model_temp.score(X_test_scaled, y_test)
-        print(f"  C={C:5.2f} -> Accuracy Test: {score:.4f}")
-        
-        if score > best_score:
-            best_score = score
-            best_C = C
-    
-    print(f"\n✓ Meilleur C: {best_C} (Accuracy: {best_score:.4f})")
-    
-    # Entraîner le modèle final avec le meilleur C
-    print(f"\n{'='*70}")
-    print(f"ENTRAÎNEMENT DU MODÈLE FINAL")
-    print(f"{'='*70}")
-    model = LogisticRegression(
-        C=best_C,
-        max_iter=2000,
-        random_state=42,
-        solver='lbfgs',
-        class_weight='balanced'
-    )
-    model.fit(X_train_scaled, y_train)
-    print("✓ Modèle entraîné")
-    
-    # Évaluation détaillée
-    y_train_pred = model.predict(X_train_scaled)
-    y_test_pred = model.predict(X_test_scaled)
-    y_test_proba = model.predict_proba(X_test_scaled)[:, 1]
+    # Évaluation
+    y_train_pred = model.predict(X_train)
+    y_test_pred = model.predict(X_test)
     
     train_acc = accuracy_score(y_train, y_train_pred)
     test_acc = accuracy_score(y_test, y_test_pred)
     
-    try:
-        test_auc = roc_auc_score(y_test, y_test_proba)
-    except:
-        test_auc = 0.0
+    print(f"\nAccuracy Train: {train_acc:.4f}")
+    print(f"Accuracy Test: {test_acc:.4f}")
     
-    print(f"\n{'='*70}")
-    print(f"PERFORMANCES DU MODÈLE")
-    print(f"{'='*70}")
-    print(f"Accuracy Train: {train_acc:.4f}")
-    print(f"Accuracy Test:  {test_acc:.4f}")
-    print(f"ROC-AUC Test:   {test_auc:.4f}")
-    print(f"Overfit:        {(train_acc - test_acc):.4f}")
-    
-    if train_acc - test_acc > 0.05:
-        print("⚠️  Attention: Surapprentissage détecté (overfit)")
-    
-    print(f"\n{'='*70}")
-    print(f"RAPPORT DE CLASSIFICATION (Test)")
-    print(f"{'='*70}")
+    print("\nRapport de classification (Test):")
     print(classification_report(y_test, y_test_pred, target_names=['Baisse', 'Hausse']))
     
-    return model, scaler, X_train, X_test, y_train, y_test
+    return model, X_train, X_test, y_train, y_test
 
 
-def export_model_weights(model, scaler, feature_names, output_path='forex_model_weights.json'):
+def export_model_weights(model, feature_names, output_path='forex_model_weights.json'):
     """
-    Exporte les poids du modèle et le scaler dans un fichier JSON.
+    Exporte les poids du modèle dans un fichier JSON.
     
     Args:
         model: Modèle entraîné
-        scaler: StandardScaler pour normalisation
         feature_names: Noms des features
         output_path: Chemin du fichier JSON de sortie
     """
     coef = model.coef_[0].tolist()
     intercept = float(model.intercept_[0])
     
-    # Exporter aussi les paramètres du scaler
-    scaler_mean = scaler.mean_.tolist()
-    scaler_scale = scaler.scale_.tolist()
-    
     weights_dict = {
         'coef': coef,
         'intercept': intercept,
-        'scaler_mean': scaler_mean,
-        'scaler_scale': scaler_scale,
         'feature_names': feature_names,
         'n_features': len(coef)
     }
@@ -245,22 +167,12 @@ def export_model_weights(model, scaler, feature_names, output_path='forex_model_
     with open(output_path, 'w') as f:
         json.dump(weights_dict, f, indent=2)
     
-    print(f"\n{'='*70}")
-    print(f"EXPORT DU MODÈLE")
-    print(f"{'='*70}")
-    print(f"Fichier: {output_path}")
+    print(f"\nModèle exporté dans {output_path}")
     print(f"Nombre de features: {len(coef)}")
     print(f"Intercept: {intercept:.6f}")
-    print(f"\nTop 5 features les plus importantes (par coefficient absolu):")
-    
-    # Afficher les features les plus importantes
-    feature_importance = [(name, abs(w)) for name, w in zip(feature_names, coef)]
-    feature_importance.sort(key=lambda x: x[1], reverse=True)
-    
-    for i, (name, importance) in enumerate(feature_importance[:5], 1):
-        idx = feature_names.index(name)
-        actual_coef = coef[idx]
-        print(f"  {i}. {name:20s} : {actual_coef:+.6f} (|{importance:.6f}|)")
+    print("\nCoefficients:")
+    for name, w in zip(feature_names, coef):
+        print(f"  {name}: {w:.6f}")
 
 
 def prepare_multiple_datasets(csv_paths: list) -> tuple:
@@ -376,10 +288,10 @@ def main():
         X, y, feature_names = prepare_multiple_datasets(valid_paths)
     
     # Entraîner le modèle
-    model, scaler, X_train, X_test, y_train, y_test = train_model(X, y)
+    model, X_train, X_test, y_train, y_test = train_model(X, y)
     
     # Exporter les poids
-    export_model_weights(model, scaler, feature_names)
+    export_model_weights(model, feature_names)
     
     print("\n✅ Entraînement terminé avec succès!")
 

@@ -1,106 +1,90 @@
 """
 Module de feature engineering pour la stratégie de trading Forex.
-Calcule des features simples et efficaces à partir de séries de prix de clôture.
+Calcule des features simples et robustes à partir de séries de prix de clôture.
 """
 
 import math
-from statistics import stdev, mean
+from statistics import stdev
 
 
 # Taille minimale de fenêtre requise pour calculer toutes les features
-WINDOW_MAX = 30
-
-
-def calculate_rsi(prices: list[float], period: int = 14) -> float:
-    """Calcule le Relative Strength Index (RSI)."""
-    if len(prices) < period + 1:
-        return 50.0
-    
-    deltas = [prices[i] - prices[i-1] for i in range(-period, 0)]
-    gains = [d if d > 0 else 0 for d in deltas]
-    losses = [-d if d < 0 else 0 for d in deltas]
-    
-    avg_gain = sum(gains) / period
-    avg_loss = sum(losses) / period
-    
-    if avg_loss == 0:
-        return 100.0
-    
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+WINDOW_MAX = 20
 
 
 def compute_features_from_close_series(closes: list[float]) -> list[float]:
     """
-    Calcule un vecteur de features optimisées à partir d'une série de prix.
+    Calcule un vecteur de features à partir d'une série de prix de clôture.
     
     Args:
         closes: Liste de prix de clôture ordonnée dans le temps (ancienne -> récente).
+                Doit contenir au moins WINDOW_MAX éléments.
     
     Returns:
-        Liste de 10 features essentielles
+        Liste de features [ret_1, ret_5, ret_10, vol_10, ma_ratio_5_20]
+    
+    Features:
+        - ret_1: Retour sur 1 période
+        - ret_5: Retour sur 5 périodes
+        - ret_10: Retour sur 10 périodes
+        - vol_10: Volatilité (écart-type des retours 1-bar) sur 10 périodes
+        - ma_ratio_5_20: Ratio (MA5 / MA20) - 1
     """
     if len(closes) < WINDOW_MAX:
         raise ValueError(f"La série doit contenir au moins {WINDOW_MAX} éléments, reçu {len(closes)}")
     
+    # Prendre les dernières valeurs nécessaires
     current = closes[-1]
     
-    # ==================== RETOURS (3) ====================
+    # Retours simples
     ret_1 = (current / closes[-2] - 1) if len(closes) >= 2 else 0.0
     ret_5 = (current / closes[-6] - 1) if len(closes) >= 6 else 0.0
     ret_10 = (current / closes[-11] - 1) if len(closes) >= 11 else 0.0
     
-    # ==================== VOLATILITÉ (2) ====================
+    # Volatilité locale : écart-type des retours 1-bar sur les 10 dernières périodes
     if len(closes) >= 11:
-        returns_10 = [(closes[i] / closes[i-1] - 1) for i in range(-10, 0)]
-        vol_10 = stdev(returns_10) if len(returns_10) > 1 else 0.0
+        returns_1bar = []
+        for i in range(-10, 0):
+            ret = closes[i] / closes[i-1] - 1
+            returns_1bar.append(ret)
+        vol_10 = stdev(returns_1bar) if len(returns_1bar) > 1 else 0.0
     else:
         vol_10 = 0.0
     
-    if len(closes) >= 21:
-        returns_20 = [(closes[i] / closes[i-1] - 1) for i in range(-20, 0)]
-        vol_20 = stdev(returns_20) if len(returns_20) > 1 else 0.0
-    else:
-        vol_20 = 0.0
-    
-    # ==================== MOYENNES MOBILES (3) ====================
+    # Moyennes mobiles
     ma_5 = sum(closes[-5:]) / 5 if len(closes) >= 5 else current
-    ma_10 = sum(closes[-10:]) / 10 if len(closes) >= 10 else current
     ma_20 = sum(closes[-20:]) / 20 if len(closes) >= 20 else current
     
+    # Ratio des moyennes mobiles
     ma_ratio_5_20 = (ma_5 / ma_20 - 1) if ma_20 != 0 else 0.0
-    price_to_ma10 = (current / ma_10 - 1) if ma_10 != 0 else 0.0
     
-    # ==================== RSI (1) ====================
-    rsi_14 = calculate_rsi(closes, period=14)
-    rsi_normalized = (rsi_14 - 50) / 50  # Normaliser entre -1 et 1
-    
-    # ==================== MOMENTUM (1) ====================
-    momentum_10 = (current / closes[-11] - 1) if len(closes) >= 11 and closes[-11] != 0 else 0.0
-    
-    # Total: 10 features essentielles
+    # Retour dans un ordre fixe
     features = [
-        ret_1,              # 0 - Retour court terme
-        ret_5,              # 1 - Retour moyen terme
-        ret_10,             # 2 - Retour long terme
-        vol_10,             # 3 - Volatilité récente
-        vol_20,             # 4 - Volatilité tendance
-        ma_ratio_5_20,      # 5 - Tendance des moyennes
-        price_to_ma10,      # 6 - Distance à la moyenne
-        rsi_normalized,     # 7 - Force relative
-        momentum_10,        # 8 - Momentum
-        ret_1 * vol_10,     # 9 - Interaction retour/volatilité
+        ret_1,
+        ret_5,
+        ret_10,
+        vol_10,
+        ma_ratio_5_20,
     ]
     
     return features
 
 
 def compute_features_from_prices_dict(history: list[dict]) -> list[float]:
-    """Helper pour extraire les closes et calculer les features."""
+    """
+    Helper pour extraire les closes d'un historique sous forme de dict et calculer les features.
+    
+    Args:
+        history: Liste de dicts contenant au minimum une clé 'priceA' ou similaire.
+    
+    Returns:
+        Liste de features calculées.
+    """
+    # Adapter selon la structure de données du projet
+    # Ici on suppose que history contient des dicts avec 'priceA'
     closes = [h.get('priceA', 0.0) for h in history]
     
     if len(closes) < WINDOW_MAX:
-        return [0.0] * 10
+        # Retourner des features neutres si pas assez de données
+        return [0.0, 0.0, 0.0, 0.0, 0.0]
     
     return compute_features_from_close_series(closes)

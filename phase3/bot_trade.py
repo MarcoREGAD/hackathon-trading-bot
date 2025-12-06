@@ -35,32 +35,16 @@ try:
         _MODEL = json.load(f)
     _COEF = _MODEL['coef']
     _INTERCEPT = _MODEL['intercept']
-    
-    # Charger les paramètres du scaler si disponibles
-    if 'scaler_mean' in _MODEL and 'scaler_scale' in _MODEL:
-        _SCALER_MEAN = _MODEL['scaler_mean']
-        _SCALER_SCALE = _MODEL['scaler_scale']
-        print(f"✅ Modèle chargé: {len(_COEF)} features (avec standardisation)")
-    else:
-        _SCALER_MEAN = None
-        _SCALER_SCALE = None
-        print(f"✅ Modèle chargé: {len(_COEF)} features (sans standardisation)")
-    
-    print(f"   Intercept: {_INTERCEPT:.4f}")
-    
+    print(f"✅ Modèle chargé: {len(_COEF)} features, intercept={_INTERCEPT:.4f}")
 except FileNotFoundError:
     print(f"⚠️  Fichier {MODEL_WEIGHTS_FILE} non trouvé. Utilisation de poids par défaut.")
-    # Poids par défaut (10 features)
-    _COEF = [0.0] * 10
+    # Poids par défaut (5 features)
+    _COEF = [0.0, 0.0, 0.0, 0.0, 0.0]
     _INTERCEPT = 0.0
-    _SCALER_MEAN = None
-    _SCALER_SCALE = None
 except Exception as e:
     print(f"⚠️  Erreur lors du chargement du modèle: {e}")
-    _COEF = [0.0] * 10
+    _COEF = [0.0, 0.0, 0.0, 0.0, 0.0]
     _INTERCEPT = 0.0
-    _SCALER_MEAN = None
-    _SCALER_SCALE = None
 
 
 # ============================================================================
@@ -86,7 +70,6 @@ def _sigmoid(z: float) -> float:
 def predict_proba_up(features: list[float]) -> float:
     """
     Calcule P(hausse) = sigmoid(w·x + b) avec le modèle logistic.
-    Applique la standardisation si le scaler est disponible.
     
     Args:
         features: Vecteur de features (doit correspondre à l'ordre du training)
@@ -98,17 +81,8 @@ def predict_proba_up(features: list[float]) -> float:
         print(f"⚠️  Nombre de features incorrect: {len(features)} vs {len(_COEF)} attendus")
         return 0.5  # Neutre par défaut
     
-    # Appliquer la standardisation si disponible
-    if _SCALER_MEAN is not None and _SCALER_SCALE is not None:
-        features_scaled = [
-            (x - mean) / scale 
-            for x, mean, scale in zip(features, _SCALER_MEAN, _SCALER_SCALE)
-        ]
-    else:
-        features_scaled = features
-    
     z = _INTERCEPT
-    for w, x in zip(_COEF, features_scaled):
+    for w, x in zip(_COEF, features):
         z += w * x
     
     return _sigmoid(z)
