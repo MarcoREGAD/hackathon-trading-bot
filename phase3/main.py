@@ -57,6 +57,9 @@ def main():
 
     for index, row in prices.iterrows():
         decision = decision_generator(int(index), float(row['Asset A']), float(row['Asset B']))
+        # print(f"{decision}")
+        if round(decision['Cash'], 2) != 0.33:
+            print(f"took a descision different than flat")
         if not validate_decision(decision):
             raise ValueError(f"Décision invalide: {decision}")
         decision['epoch'] = int(index)
