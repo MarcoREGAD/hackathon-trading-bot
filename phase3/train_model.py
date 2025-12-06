@@ -20,6 +20,7 @@ import numpy as np
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report
 from features import compute_features_from_close_series, WINDOW_MAX
+from multiprocessing import Pool, cpu_count
 
 
 def prepare_data(csv_path: str, asset_col: str = 'Asset A'):
@@ -90,6 +91,9 @@ def prepare_data(csv_path: str, asset_col: str = 'Asset A'):
             print(f"Erreur à l'index {i}: {e}")
             continue
     
+    if len(X_list) == 0:
+        raise ValueError(f"Aucune feature n'a pu être calculée pour {csv_path}. Le fichier contient probablement trop peu de données (< {WINDOW_MAX} lignes).")
+    
     X = np.array(X_list)
     y = np.array(y_list)
     
@@ -97,7 +101,15 @@ def prepare_data(csv_path: str, asset_col: str = 'Asset A'):
     print(f"Shape de y: {y.shape}")
     print(f"Distribution des labels - Hausse: {np.sum(y)}, Baisse: {len(y) - np.sum(y)}")
     
-    feature_names = ['ret_1', 'ret_5', 'ret_10', 'vol_10', 'ma_ratio_5_20']
+    feature_names = [
+        'ret_1', 'ret_3', 'ret_5', 'ret_10', 'ret_20',
+        'vol_5', 'vol_10', 'vol_20', 'atr_14',
+        'ma_ratio_5_20', 'ma_ratio_10_30', 'ema_ratio_12_26',
+        'price_to_ma_20', 'price_to_ma_50',
+        'rsi_14', 'macd_norm', 'macd_signal_norm', 'macd_hist_norm',
+        'bb_width', 'bb_position', 'momentum_5', 'momentum_10',
+        'trend_slope_norm'
+    ]
     
     return X, y, feature_names
 
@@ -176,46 +188,185 @@ def export_model_weights(model, feature_names, output_path='forex_model_weights.
         print(f"  {name}: {w:.6f}")
 
 
-def prepare_multiple_datasets(csv_paths: list) -> tuple:
+def load_single_dataset(args: tuple) -> tuple:
     """
-    Charge et combine plusieurs datasets pour l'entraînement.
+    Charge un seul dataset (fonction pour le multiprocessing).
+    
+    Args:
+        args: (csv_path, index, total)
+    
+    Returns:
+        (X, y, feat_names, csv_path) ou None si erreur
+    """
+    csv_path, index, total = args
+    try:
+        # Détecter le type de colonne
+        if 'currencies' in csv_path or 'eur.csv' in csv_path.lower():
+            asset_col = 'exchange_rate'
+        else:
+            asset_col = 'Asset A'
+        
+        # Préparer les données pour ce fichier (sans print pour éviter la confusion)
+        X, y, feat_names = prepare_data(csv_path, asset_col, silent=True)
+        
+        # Vérifier que nous avons bien des données
+        if X.shape[0] == 0 or X.shape[1] == 0:
+            return None
+        
+        return (X, y, feat_names, csv_path, index, X.shape[0])
+        
+    except Exception as e:
+        return None
+
+
+def prepare_data(csv_path: str, asset_col: str = 'Asset A', silent: bool = False):
+    """
+    Charge les données et prépare X (features) et y (labels).
+    Supporte deux formats de CSV:
+    1. Format "Asset A, Asset B" (phase1/phase3 avec index)
+    2. Format Forex "date,exchange_rate" (currencies/)
+    
+    Args:
+        csv_path: Chemin vers le fichier CSV
+        asset_col: Nom de la colonne de prix à utiliser (ou 'exchange_rate' pour Forex)
+        silent: Si True, n'affiche pas les messages de progression
+    
+    Returns:
+        X (array), y (array), feature_names (list)
+    """
+    if not silent:
+        print(f"Chargement des données depuis {csv_path}...")
+    
+    # Essayer de détecter le format du fichier
+    df_test = pd.read_csv(csv_path, nrows=5)
+    
+    if 'exchange_rate' in df_test.columns:
+        # Format Forex: date,exchange_rate
+        if not silent:
+            print("✓ Format Forex détecté (date,exchange_rate)")
+        df = pd.read_csv(csv_path)
+        asset_col = 'exchange_rate'
+        if not silent:
+            print(f"Date range: {df['date'].iloc[0]} → {df['date'].iloc[-1]}")
+    elif 'Asset A' in df_test.columns or 'Asset B' in df_test.columns:
+        # Format Asset A/B avec index
+        if not silent:
+            print("✓ Format Asset A/B détecté")
+        df = pd.read_csv(csv_path, index_col=0)
+    else:
+        # Essayer de charger avec index par défaut
+        df = pd.read_csv(csv_path, index_col=0)
+    
+    if asset_col not in df.columns:
+        raise ValueError(f"Colonne '{asset_col}' non trouvée. Colonnes disponibles: {df.columns.tolist()}")
+    
+    if not silent:
+        print(f"Nombre de lignes: {len(df)}")
+    
+    # Créer le label : future_return et y
+    df['future_return'] = df[asset_col].shift(-1) / df[asset_col] - 1
+    df['y'] = (df['future_return'] > 0).astype(int)
+    
+    # Supprimer les NaN
+    df = df.dropna()
+    if not silent:
+        print(f"Nombre de lignes après nettoyage: {len(df)}")
+    
+    # Calculer les features pour chaque ligne
+    closes = df[asset_col].tolist()
+    X_list = []
+    y_list = []
+    
+    if not silent:
+        print("Calcul des features...")
+    for i in range(WINDOW_MAX, len(closes)):
+        # Prendre la fenêtre de prix jusqu'à i (inclus)
+        window = closes[:i+1]
+        
+        # Calculer les features
+        try:
+            features = compute_features_from_close_series(window)
+            X_list.append(features)
+            # Le label correspond à l'index i dans le DataFrame nettoyé
+            # Mais attention: après dropna, les indices peuvent ne pas correspondre
+            # On utilise iloc pour être sûr
+            y_list.append(df.iloc[i]['y'])
+        except Exception as e:
+            if not silent:
+                print(f"Erreur à l'index {i}: {e}")
+            continue
+    
+    if len(X_list) == 0:
+        raise ValueError(f"Aucune feature n'a pu être calculée pour {csv_path}. Le fichier contient probablement trop peu de données (< {WINDOW_MAX} lignes).")
+    
+    X = np.array(X_list)
+    y = np.array(y_list)
+    
+    if not silent:
+        print(f"Shape de X: {X.shape}")
+        print(f"Shape de y: {y.shape}")
+        print(f"Distribution des labels - Hausse: {np.sum(y)}, Baisse: {len(y) - np.sum(y)}")
+    
+    feature_names = [
+        'ret_1', 'ret_3', 'ret_5', 'ret_10', 'ret_20',
+        'vol_5', 'vol_10', 'vol_20', 'atr_14',
+        'ma_ratio_5_20', 'ma_ratio_10_30', 'ema_ratio_12_26',
+        'price_to_ma_20', 'price_to_ma_50',
+        'rsi_14', 'macd_norm', 'macd_signal_norm', 'macd_hist_norm',
+        'bb_width', 'bb_position', 'momentum_5', 'momentum_10',
+        'trend_slope_norm'
+    ]
+    
+    return X, y, feature_names
+
+
+def prepare_multiple_datasets(csv_paths: list, n_processes: int = None) -> tuple:
+    """
+    Charge et combine plusieurs datasets pour l'entraînement en parallèle.
     
     Args:
         csv_paths: Liste de chemins vers les fichiers CSV
+        n_processes: Nombre de processus à utiliser (None = auto)
     
     Returns:
         X_combined (array), y_combined (array), feature_names (list)
     """
+    if n_processes is None:
+        n_processes = cpu_count()
+    
+    print(f"📊 Chargement de {len(csv_paths)} dataset(s) en parallèle ({n_processes} processus)...\n")
+    
+    # Préparer les arguments pour chaque fichier
+    args_list = [(csv_path, i+1, len(csv_paths)) for i, csv_path in enumerate(csv_paths)]
+    
+    # Utiliser multiprocessing.Pool pour charger les fichiers en parallèle
     X_all = []
     y_all = []
     feature_names = None
     
-    print(f"📊 Chargement de {len(csv_paths)} dataset(s)...\n")
+    with Pool(processes=n_processes) as pool:
+        results = pool.map(load_single_dataset, args_list)
     
-    for i, csv_path in enumerate(csv_paths, 1):
-        try:
-            print(f"[{i}/{len(csv_paths)}] {csv_path}")
-            
-            # Détecter le type de colonne
-            if 'currencies' in csv_path or 'eur.csv' in csv_path.lower():
-                asset_col = 'exchange_rate'
-            else:
-                asset_col = 'Asset A'
-            
-            # Préparer les données pour ce fichier
-            X, y, feat_names = prepare_data(csv_path, asset_col)
-            
+    # Traiter les résultats
+    successful = 0
+    failed = 0
+    for result in results:
+        if result is not None:
+            X, y, feat_names, csv_path, index, n_samples = result
             X_all.append(X)
             y_all.append(y)
             
             if feature_names is None:
                 feature_names = feat_names
             
-            print(f"    ✓ {X.shape[0]} samples ajoutés\n")
-            
-        except Exception as e:
-            print(f"    ⚠️  Erreur lors du chargement: {e}\n")
-            continue
+            successful += 1
+            print(f"[{index}/{len(csv_paths)}] ✓ {os.path.basename(csv_path)}: {n_samples} samples")
+        else:
+            failed += 1
+    
+    print(f"\n✓ {successful} datasets chargés avec succès")
+    if failed > 0:
+        print(f"⚠️  {failed} datasets ignorés (erreurs ou données insuffisantes)")
     
     if len(X_all) == 0:
         raise ValueError("Aucun dataset n'a pu être chargé!")
