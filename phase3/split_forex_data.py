@@ -91,7 +91,7 @@ def main():
     split_forex_data(
         input_file=str(input_file),
         output_dir=str(output_dir),
-        max_currencies=30
+        max_currencies=200
     )
 
 

@@ -14,6 +14,7 @@ Le CSV doit contenir les colonnes: Asset A, Asset B (ou similar) OU date,exchang
 import sys
 import json
 import glob
+import os
 import pandas as pd
 import numpy as np
 from sklearn.linear_model import LogisticRegression
@@ -237,7 +238,7 @@ def prepare_multiple_datasets(csv_paths: list) -> tuple:
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python train_model.py <path_to_csv> [path_to_csv2] [path_to_csv3] ...")
+        print("Usage: python train_model.py <path_to_csv_or_directory> [path2] [path3] ...")
         print("\nExemples:")
         print("  # Un seul fichier")
         print("  python train_model.py data/asset_a_b_train.csv")
@@ -246,27 +247,45 @@ def main():
         print("  # Plusieurs fichiers")
         print("  python train_model.py data/currencies/gbp_eur.csv data/currencies/usd_eur.csv")
         print()
-        print("  # Utiliser un pattern (wildcard)")
-        print("  python train_model.py data/currencies/gbp_eur.csv data/currencies/jpy_eur.csv data/currencies/chf_eur.csv")
+        print("  # Un dossier entier (tous les .csv)")
+        print("  python train_model.py data/currencies/")
+        print()
+        print("  # Mélange fichiers et dossiers")
+        print("  python train_model.py data/currencies/ data/asset_a_b_train.csv")
         sys.exit(1)
     
-    # Récupérer tous les chemins de fichiers
-    csv_paths = sys.argv[1:]
+    # Récupérer tous les chemins de fichiers ou dossiers
+    input_paths = sys.argv[1:]
     
-    # Résoudre les wildcards si nécessaire (au cas où le shell ne l'a pas fait)
-    expanded_paths = []
-    for path in csv_paths:
-        if '*' in path:
-            expanded_paths.extend(glob.glob(path))
+    # Résoudre les chemins : fichiers individuels ou tous les CSV d'un dossier
+    csv_paths = []
+    
+    for path in input_paths:
+        if os.path.isfile(path) and path.endswith('.csv'):
+            # C'est un fichier CSV
+            csv_paths.append(path)
+        elif os.path.isdir(path):
+            # C'est un dossier, prendre tous les fichiers .csv
+            pattern = os.path.join(path, '*.csv')
+            found_files = glob.glob(pattern)
+            csv_paths.extend(found_files)
+            print(f"📁 Dossier détecté: {path} ({len(found_files)} fichiers CSV trouvés)")
+        elif '*' in path:
+            # Pattern avec wildcard
+            found_files = glob.glob(path)
+            csv_paths.extend([f for f in found_files if f.endswith('.csv')])
         else:
-            expanded_paths.append(path)
+            print(f"⚠️  Ignoré (ni fichier CSV ni dossier): {path}")
     
-    # Filtrer pour garder uniquement les fichiers CSV valides
-    valid_paths = [p for p in expanded_paths if p.endswith('.csv')]
+    # Filtrer pour garder uniquement les fichiers CSV valides et uniques
+    valid_paths = list(set([p for p in csv_paths if p.endswith('.csv') and os.path.isfile(p)]))
     
     if len(valid_paths) == 0:
         print("❌ Aucun fichier CSV valide trouvé!")
         sys.exit(1)
+    
+    # Trier par nom pour avoir un ordre prévisible
+    valid_paths.sort()
     
     print(f"\n{'='*70}")
     print(f"🚀 ENTRAÎNEMENT DU MODÈLE DE TRADING")
